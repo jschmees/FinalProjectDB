@@ -2,7 +2,9 @@ import pdfplumber
 from django.core.management.base import BaseCommand
 import openai
 import os
+import json
 from menu_manager.models import Restaurant, Menu, MenuSection, MenuItem, DietaryRestrictions
+
 
 class Command(BaseCommand):
     help = "Extracts text from a menu PDF, processes it with AI, validates, and inserts it into the database."
@@ -17,66 +19,102 @@ class Command(BaseCommand):
             self.stdout.write("PDF extraction complete")
 
             # Step 2: Process extracted text with AI
-            structured_data = self.process_with_ai(text)
-            self.stdout.write(f"Structured data from AI:\n{structured_data}")
+            structured_data_text = self.process_with_ai(text)
+            self.stdout.write(f"AI Response:\n{structured_data_text}")
 
-            # Step 3: Validate data
-            is_valid, message = self.validate_data(structured_data)
-            if is_valid:
-                # Step 4: Insert data into the database
-                self.insert_data(structured_data)
+            # Parse the AI response as JSON
+            try:
+                structured_data = json.loads(structured_data_text)
+                self.stdout.write("AI response parsed as JSON successfully.")
+            except json.JSONDecodeError as e:
+                self.stdout.write(self.style.ERROR(f"Failed to parse AI response as JSON: {e}"))
+                structured_data = None
+
+            # Step 3: Validate data if parsing was successful
+            if structured_data:
+                is_valid, message = self.validate_data(structured_data)
+                if is_valid:
+                    # Step 4: Insert data into the database
+                    self.insert_data(structured_data)
+                else:
+                    self.stdout.write(self.style.ERROR(f"Data validation failed: {message}"))
             else:
-                self.stdout.write(self.style.ERROR(f"Data validation failed: {message}"))
+                self.stdout.write(self.style.ERROR("No structured data to process."))
 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"PDF extraction or AI processing failed: {e}"))
+            self.stdout.write(self.style.ERROR(f"ETL process failed: {e}"))
 
     def process_with_ai(self, text):
         openai.api_key = os.getenv("OPENAI_API_KEY")
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or "gpt-4" if you have access
+            model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are an assistant that extracts structured menu data."},
-                {"role": "user", "content": f"Extract and structure menu data from the following text according to this format:\n\n"
-                                            f"Restaurant:\n"
-                                            f"- name: (text)\n"
-                                            f"- location: (text)\n"
-                                            f"- contact_number: (text)\n"
-                                            f"- email: (text)\n"
-                                            f"- website: (text)\n\n"
-                                            f"Menu:\n"
-                                            f"- version: (integer)\n"
-                                            f"- status: ('active' or 'archived')\n"
-                                            f"MenuSections:\n"
-                                            f"- section_name: (text)\n"
-                                            f"- description: (text)\n"
-                                            f"MenuItems:\n"
-                                            f"- item_name: (text)\n"
-                                            f"- description: (text)\n"
-                                            f"- price: (decimal)\n"
-                                            f"- availability_status: (boolean)\n"
-                                            f"DietaryRestrictions:\n"
-                                            f"- restriction_type: (text)\n"
-                                            f"- notes: (text)\n\n"
-                                            f"Text:\n{text}"}
+                {
+                    "role": "system",
+                    "content": "You are an assistant that extracts structured menu data and returns it in strict JSON format without any extra text."
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Extract and structure menu data from the following text. "
+                        f"Return the data in JSON format matching this structure:\n\n"
+                        f"{{\n"
+                        f"  \"restaurant\": {{\n"
+                        f"    \"name\": \"...\",\n"
+                        f"    \"location\": \"...\",\n"
+                        f"    \"contact_number\": \"...\",\n"
+                        f"    \"email\": \"...\",\n"
+                        f"    \"website\": \"...\"\n"
+                        f"  }},\n"
+                        f"  \"menu\": {{\n"
+                        f"    \"version\": 1,\n"
+                        f"    \"status\": \"active\"\n"
+                        f"  }},\n"
+                        f"  \"menu_sections\": [\n"
+                        f"    {{\n"
+                        f"      \"section_name\": \"...\",\n"
+                        f"      \"description\": \"...\",\n"
+                        f"      \"items\": [\n"
+                        f"        {{\n"
+                        f"          \"item_name\": \"...\",\n"
+                        f"          \"description\": \"...\",\n"
+                        f"          \"price\": \"...\",\n"
+                        f"          \"availability_status\": true\n"
+                        f"        }}\n"
+                        f"      ]\n"
+                        f"    }}\n"
+                        f"  ],\n"
+                        f"  \"dietary_restrictions\": [\n"
+                        f"    {{\n"
+                        f"      \"item_name\": \"...\",\n"
+                        f"      \"restriction_type\": \"...\",\n"
+                        f"      \"notes\": \"...\"\n"
+                        f"    }}\n"
+                        f"  ]\n"
+                        f"}}\n\n"
+                        f"Text:\n{text}"
+                    )
+                }
             ],
             temperature=0.5,
-            max_tokens=1000
+            max_tokens=1500
         )
         return response['choices'][0]['message']['content']
 
     def validate_data(self, data):
         # Check Restaurant fields
-        if not all(key in data for key in ["name", "location", "contact_number", "email", "website"]):
+        restaurant = data.get("restaurant", {})
+        if not all(key in restaurant for key in ["name", "location", "contact_number", "email", "website"]):
             return False, "Missing Restaurant fields"
 
         # Check Menu fields
-        if not all(key in data.get("menu", {}) for key in ["version", "status"]):
+        menu = data.get("menu", {})
+        if not all(key in menu for key in ["version", "status"]):
             return False, "Missing Menu fields"
 
         # Check Menu Sections
         for section in data.get("menu_sections", []):
-            if not all(key in section for key in ["section_name", "description"]):
+            if not all(key in section for key in ["section_name", "description", "items"]):
                 return False, f"Missing fields in Menu Section: {section}"
 
             # Check Menu Items
@@ -86,7 +124,7 @@ class Command(BaseCommand):
 
         # Check Dietary Restrictions
         for restriction in data.get("dietary_restrictions", []):
-            if not all(key in restriction for key in ["restriction_type", "notes"]):
+            if not all(key in restriction for key in ["item_name", "restriction_type", "notes"]):
                 return False, f"Missing fields in Dietary Restrictions: {restriction}"
 
         return True, "Data is valid"
@@ -94,19 +132,23 @@ class Command(BaseCommand):
     def insert_data(self, data):
         try:
             # Insert Restaurant data
+            restaurant_data = data["restaurant"]
             restaurant, _ = Restaurant.objects.get_or_create(
-                name=data["name"],
-                location=data["location"],
-                contact_number=data["contact_number"],
-                email=data["email"],
-                website=data["website"]
+                name=restaurant_data["name"],
+                defaults={
+                    "location": restaurant_data["location"],
+                    "contact_number": restaurant_data["contact_number"],
+                    "email": restaurant_data["email"],
+                    "website": restaurant_data["website"],
+                }
             )
 
             # Insert Menu data
+            menu_data = data["menu"]
             menu = Menu.objects.create(
                 restaurant=restaurant,
-                version=data["menu"]["version"],
-                status=data["menu"]["status"]
+                version=menu_data["version"],
+                status=menu_data["status"]
             )
 
             # Insert Menu Sections and Items
@@ -118,22 +160,26 @@ class Command(BaseCommand):
                 )
 
                 for item_data in section_data["items"]:
-                    MenuItem.objects.create(
+                    # Normalize price format
+                    price_str = item_data["price"].replace('€', '').replace(',', '.').strip()
+                    price = float(price_str) if price_str else 0.0  # Default to 0.0 if price is empty
+
+                    menu_item = MenuItem.objects.create(
                         section=section,
                         item_name=item_data["item_name"],
                         description=item_data.get("description", ""),
-                        price=item_data["price"],
+                        price=price,
                         availability_status=item_data["availability_status"]
                     )
 
-            # Insert Dietary Restrictions
-            for restriction_data in data.get("dietary_restrictions", []):
-                item = MenuItem.objects.get(item_name=restriction_data["item_name"])  # Assuming 'item_name' for lookup
-                DietaryRestrictions.objects.create(
-                    item=item,
-                    restriction_type=restriction_data["restriction_type"],
-                    notes=restriction_data.get("notes", "")
-                )
+                    # Check if dietary restrictions are provided for the item
+                    dietary_restrictions = item_data.get("dietary_restrictions", [])
+                    for restriction in dietary_restrictions:
+                        DietaryRestrictions.objects.create(
+                            item=menu_item,
+                            restriction_type=restriction.get("restriction_type", ""),
+                            notes=restriction.get("notes", "")
+                        )
 
             self.stdout.write(self.style.SUCCESS("Data inserted successfully."))
 
