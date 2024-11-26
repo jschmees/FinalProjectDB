@@ -1,7 +1,9 @@
 from django.test import TestCase
+from unittest.mock import patch, MagicMock
 from .models import Restaurant, Menu, MenuSection, MenuItem, DietaryRestrictions, ProcessingLogs
+from menu_manager.management.commands.etl_process import Command
+import tempfile
 
-#Tests für Phase 2
 
 class RestaurantMenuTestCase(TestCase):
 
@@ -40,8 +42,5 @@ class RestaurantMenuTestCase(TestCase):
 
     def test_menu_item_price(self):
         self.assertTrue(self.item.price > 0, "Price should be greater than zero")
-
-
-
 
 
