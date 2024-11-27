@@ -36,7 +36,8 @@ class Command(BaseCommand):
 
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"ETL process failed: {e}"))
-            self.log_processing(menu, 'error', str(e))
+            if menu:
+                self.log_processing(menu, 'error', str(e))
 
     def extract_text_from_pdf(self, file_path):
         try:
@@ -203,13 +204,11 @@ class Command(BaseCommand):
 
     def log_processing(self, menu, status, error_message=""):
         try:
-            ProcessingLogs.objects.create(
-                menu=menu,
-                status=status,
-                error_message=error_message if status == 'error' else ""
-            )
+            if menu:
+                ProcessingLogs.objects.create(
+                    menu=menu,
+                    status=status,
+                    error_message=error_message if status == 'error' else ""
+                )
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Failed to log processing: {e}"))
-
-
-##
