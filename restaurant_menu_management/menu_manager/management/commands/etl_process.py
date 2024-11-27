@@ -210,3 +210,6 @@ class Command(BaseCommand):
             )
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Failed to log processing: {e}"))
+
+
+##
