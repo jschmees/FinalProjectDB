@@ -76,3 +76,4 @@ class ProcessingLogs(models.Model):
             models.Index(fields=['timestamp']),
             models.Index(fields=['status']),
         ]
+#nmdioasnjimsdioanfiosaifisa

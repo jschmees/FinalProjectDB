@@ -3,19 +3,17 @@ from django.core.management.base import BaseCommand
 import openai
 import os
 import json
-from menu_manager.models import Restaurant, Menu, MenuSection, MenuItem, DietaryRestrictions
+from menu_manager.models import Restaurant, Menu, MenuSection, MenuItem, DietaryRestrictions, ProcessingLogs
 
 
 class Command(BaseCommand):
     help = "Extracts text from a menu PDF, processes it with AI, validates, and inserts it into the database."
 
     def handle(self, *args, **kwargs):
-        # Step 1: PDF Extraction
+        menu = None
         try:
-            with pdfplumber.open("/Users/jannikschmees/PycharmProjects/FinalProjectDB/restaurant_menu_management/menu_manager/pdf_files/thehatmenu_eng.pdf") as pdf:
-                text = ""
-                for page in pdf.pages:
-                    text += page.extract_text()
+            # Step 1: PDF Extraction
+            text = self.extract_text_from_pdf("/Users/jannikschmees/PycharmProjects/FinalProjectDB/restaurant_menu_management/menu_manager/pdf_files/thehatmenu_eng.pdf")
             self.stdout.write("PDF extraction complete")
 
             # Step 2: Process extracted text with AI
@@ -23,83 +21,99 @@ class Command(BaseCommand):
             self.stdout.write(f"AI Response:\n{structured_data_text}")
 
             # Parse the AI response as JSON
-            try:
-                structured_data = json.loads(structured_data_text)
-                self.stdout.write("AI response parsed as JSON successfully.")
-            except json.JSONDecodeError as e:
-                self.stdout.write(self.style.ERROR(f"Failed to parse AI response as JSON: {e}"))
-                structured_data = None
+            structured_data = self.parse_json(structured_data_text)
+            if not structured_data:
+                raise ValueError("No structured data to process.")
 
             # Step 3: Validate data if parsing was successful
-            if structured_data:
-                is_valid, message = self.validate_data(structured_data)
-                if is_valid:
-                    # Step 4: Insert data into the database
-                    self.insert_data(structured_data)
-                else:
-                    self.stdout.write(self.style.ERROR(f"Data validation failed: {message}"))
-            else:
-                self.stdout.write(self.style.ERROR("No structured data to process."))
+            is_valid, message = self.validate_data(structured_data)
+            if not is_valid:
+                raise ValueError(f"Data validation failed: {message}")
+
+            # Step 4: Insert data into the database
+            menu = self.insert_data(structured_data)
+            self.stdout.write(self.style.SUCCESS("ETL process completed successfully."))
 
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"ETL process failed: {e}"))
+            self.log_processing(menu, 'error', str(e))
+
+    def extract_text_from_pdf(self, file_path):
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                text = ""
+                for page in pdf.pages:
+                    text += page.extract_text() or ""
+            return text
+        except Exception as e:
+            raise RuntimeError(f"Failed to extract text from PDF: {e}")
 
     def process_with_ai(self, text):
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an assistant that extracts structured menu data and returns it in strict JSON format without any extra text."
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Extract and structure menu data from the following text. "
-                        f"Return the data in JSON format matching this structure:\n\n"
-                        f"{{\n"
-                        f"  \"restaurant\": {{\n"
-                        f"    \"name\": \"...\",\n"
-                        f"    \"location\": \"...\",\n"
-                        f"    \"contact_number\": \"...\",\n"
-                        f"    \"email\": \"...\",\n"
-                        f"    \"website\": \"...\"\n"
-                        f"  }},\n"
-                        f"  \"menu\": {{\n"
-                        f"    \"version\": 1,\n"
-                        f"    \"status\": \"active\"\n"
-                        f"  }},\n"
-                        f"  \"menu_sections\": [\n"
-                        f"    {{\n"
-                        f"      \"section_name\": \"...\",\n"
-                        f"      \"description\": \"...\",\n"
-                        f"      \"items\": [\n"
-                        f"        {{\n"
-                        f"          \"item_name\": \"...\",\n"
-                        f"          \"description\": \"...\",\n"
-                        f"          \"price\": \"...\",\n"
-                        f"          \"availability_status\": true\n"
-                        f"        }}\n"
-                        f"      ]\n"
-                        f"    }}\n"
-                        f"  ],\n"
-                        f"  \"dietary_restrictions\": [\n"
-                        f"    {{\n"
-                        f"      \"item_name\": \"...\",\n"
-                        f"      \"restriction_type\": \"...\",\n"
-                        f"      \"notes\": \"...\"\n"
-                        f"    }}\n"
-                        f"  ]\n"
-                        f"}}\n\n"
-                        f"Text:\n{text}"
-                    )
-                }
-            ],
-            temperature=0.5,
-            max_tokens=2000
-        )
-        return response['choices'][0]['message']['content']
+        try:
+            openai.api_key = os.getenv("OPENAI_API_KEY")
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an assistant that extracts structured menu data and returns it in strict JSON format without any extra text."
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Extract and structure menu data from the following text. "
+                            f"Return the data in JSON format matching this structure:\n\n"
+                            f"{{\n"
+                            f"  \"restaurant\": {{\n"
+                            f"    \"name\": \"...\",\n"
+                            f"    \"location\": \"...\",\n"
+                            f"    \"contact_number\": \"...\",\n"
+                            f"    \"email\": \"...\",\n"
+                            f"    \"website\": \"...\"\n"
+                            f"  }},\n"
+                            f"  \"menu\": {{\n"
+                            f"    \"version\": 1,\n"
+                            f"    \"status\": \"active\"\n"
+                            f"  }},\n"
+                            f"  \"menu_sections\": [\n"
+                            f"    {{\n"
+                            f"      \"section_name\": \"...\",\n"
+                            f"      \"description\": \"...\",\n"
+                            f"      \"items\": [\n"
+                            f"        {{\n"
+                            f"          \"item_name\": \"...\",\n"
+                            f"          \"description\": \"...\",\n"
+                            f"          \"price\": \"...\",\n"
+                            f"          \"availability_status\": true\n"
+                            f"        }}\n"
+                            f"      ]\n"
+                            f"    }}\n"
+                            f"  ],\n"
+                            f"  \"dietary_restrictions\": [\n"
+                            f"    {{\n"
+                            f"      \"item_name\": \"...\",\n"
+                            f"      \"restriction_type\": \"...\",\n"
+                            f"      \"notes\": \"...\"\n"
+                            f"    }}\n"
+                            f"  ]\n"
+                            f"}}\n\n"
+                            f"Text:\n{text}"
+                        )
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=2000
+            )
+            return response['choices'][0]['message']['content']
+        except Exception as e:
+            raise RuntimeError(f"AI processing failed: {e}")
+
+    def parse_json(self, structured_data_text):
+        try:
+            return json.loads(structured_data_text)
+        except json.JSONDecodeError as e:
+            self.stdout.write(self.style.ERROR(f"Failed to parse AI response as JSON: {e}"))
+            return None
 
     def validate_data(self, data):
         # Check Restaurant fields
@@ -181,7 +195,18 @@ class Command(BaseCommand):
                             notes=restriction.get("notes", "")
                         )
 
-            self.stdout.write(self.style.SUCCESS("Data inserted successfully."))
+            self.log_processing(menu, 'processed', "Data inserted successfully.")
+            return menu
 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Data insertion failed: {e}"))
+            raise RuntimeError(f"Data insertion failed: {e}")
+
+    def log_processing(self, menu, status, error_message=""):
+        try:
+            ProcessingLogs.objects.create(
+                menu=menu,
+                status=status,
+                error_message=error_message if status == 'error' else ""
+            )
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"Failed to log processing: {e}"))
