@@ -1,0 +1,25 @@
+<!-- full_text_search_results.html -->
+<form method="get" action="{% url 'full_text_search' %}">
+    <input type="text" name="q" placeholder="Search for restaurants or menu items...">
+    <button type="submit">Search</button>
+</form>
+
+<h2>Search Results:</h2>
+
+<h3>Restaurants:</h3>
+<ul>
+    {% for restaurant in restaurant_results %}
+    <li>{{ restaurant.name }} - {{ restaurant.location }}</li>
+    {% empty %}
+    <li>No matching restaurants found.</li>
+    {% endfor %}
+</ul>
+
+<h3>Menu Items:</h3>
+<ul>
+    {% for item in menuitem_results %}
+    <li>{{ item.item_name }}: {{ item.description }}</li>
+    {% empty %}
+    <li>No matching menu items found.</li>
+    {% endfor %}
+</ul>
