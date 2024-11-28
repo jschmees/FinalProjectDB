@@ -17,8 +17,18 @@ class Restaurant(models.Model):
 class Menu(models.Model):
     restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE)
     created_date = models.DateTimeField(auto_now_add=True)
-    version = models.IntegerField()
-    status = models.CharField(max_length=20, choices=[('active', 'Active'), ('archived', 'Archived')])
+    version = models.IntegerField(default=1)
+    status = models.CharField(max_length=20, choices=[('active', 'Active'), ('archived', 'Archived'), ('draft', 'Draft')])
+
+    def save(self, *args, **kwargs):
+        # Wenn es eine neue Instanz ist, Version automatisch erhöhen
+        if self.pk is None:
+            previous_menu = Menu.objects.filter(restaurant=self.restaurant).order_by('-version').first()
+            if previous_menu:
+                self.version = previous_menu.version + 1
+            else:
+                self.version = 1
+        super().save(*args, **kwargs)
 
     class Meta:
         indexes = [
