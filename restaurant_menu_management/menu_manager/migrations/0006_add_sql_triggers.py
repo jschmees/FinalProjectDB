@@ -30,6 +30,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(create_trigger, reverse_code=drop_trigger),
+
     ]
 

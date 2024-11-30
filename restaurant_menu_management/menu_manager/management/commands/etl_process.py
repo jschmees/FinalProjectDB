@@ -13,7 +13,7 @@ class Command(BaseCommand):
         menu = None
         try:
             # Step 1: PDF Extraction
-            text = self.extract_text_from_pdf("/Users/jannikschmees/PycharmProjects/FinalProjectDB/restaurant_menu_management/menu_manager/pdf_files/thehatmenu_eng.pdf")
+            text = self.extract_text_from_pdf("/Users/jannikschmees/PycharmProjects/FinalProjectDB/restaurant_menu_management/menu_manager/pdf_files/thesocialhubmenu.pdf")
             self.stdout.write("PDF extraction complete")
 
             # Step 2: Process extracted text with AI
@@ -103,7 +103,7 @@ class Command(BaseCommand):
                     }
                 ],
                 temperature=0.5,
-                max_tokens=2000
+                max_tokens=4000
             )
             return response['choices'][0]['message']['content']
         except Exception as e:
@@ -204,11 +204,18 @@ class Command(BaseCommand):
 
     def log_processing(self, menu, status, error_message=""):
         try:
-            if menu:
+            # Überprüfen, ob das Menü korrekt gespeichert wurde
+            if menu and menu.pk:  # Nur loggen, wenn `menu` eine gültige ID hat
                 ProcessingLogs.objects.create(
                     menu=menu,
                     status=status,
                     error_message=error_message if status == 'error' else ""
                 )
+            else:
+                self.stdout.write(self.style.WARNING(
+                    f"Skipping log entry: Menu object is invalid or not saved. Status: {status}, Error: {error_message}"
+                ))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Failed to log processing: {e}"))
+
+
