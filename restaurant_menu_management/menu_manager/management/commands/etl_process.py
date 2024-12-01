@@ -4,7 +4,7 @@ import openai
 import os
 import json
 from menu_manager.models import Restaurant, Menu, MenuSection, MenuItem, DietaryRestrictions, ProcessingLogs
-
+from menu_manager.file_selector import get_pdf_file_path
 
 class Command(BaseCommand):
     help = "Extracts text from a menu PDF, processes it with AI, validates, and inserts it into the database."
@@ -13,7 +13,10 @@ class Command(BaseCommand):
         menu = None
         try:
             # Step 1: PDF Extraction
-            text = self.extract_text_from_pdf("/Users/jannikschmees/PycharmProjects/FinalProjectDB/restaurant_menu_management/menu_manager/pdf_files/thesocialhubmenu.pdf")
+            file_path = get_pdf_file_path()
+            if not file_path:
+                raise ValueError("No file selected.")
+            text = self.extract_text_from_pdf(file_path)
             self.stdout.write("PDF extraction complete")
 
             # Step 2: Process extracted text with AI
